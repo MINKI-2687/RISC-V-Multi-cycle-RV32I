@@ -55,31 +55,26 @@
 ## 2. System Architecture
 
 ### 전체 Block Diagram
-
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: Vivado Block Design 또는 발표자료 슬라이드의 전체 Block Diagram 캡처
-  파일명 예시: docs/images/block_diagram_top.png
--->
+![Block_Diagram_Top](docs/images/block_diagram_top.png)
 
 ```
-                     ┌────────────────────────────────────────────────────────┐
-                     │                   rv32i_mcu (Top)                     │
-                     │                                                        │
-  ┌─────────────┐   │   ┌────────────┐    ┌────────────────────────────────┐ │
-  │  Instruction │   │   │            │    │          APB Master            │ │
-  │  Memory(ROM) │──┼──▶│  RV32I CPU │───▶│  IDLE ──▶ SETUP ──▶ ACCESS   │ │
-  │  (256 x 32b) │   │   │ (Multi-Cyc)│◀──│   Addr Decoder + APB MUX     │ │
-  └─────────────┘   │   └────────────┘    └──────┬─────────────────────────┘ │
-                     │                           │ paddr/pwdata/psel/penable  │
-                     │              ┌────────────┼──────────────────────────┐ │
-                     │              ▼            ▼            ▼             │ │
-                     │         ┌────────┐  ┌────────┐  ┌────────┐         │ │
-                     │         │APB_BRAM│  │APB_GPO │  │APB_GPI │  ...    │ │
-                     │         │0x1000_ │  │0x2000_ │  │0x2001_ │         │ │
-                     │         │  0000  │  │  0000  │  │  0000  │         │ │
-                     │         └────────┘  └────────┘  └────────┘         │ │
-                     └────────────────────────────────────────────────────────┘
+                     ┌─────────────────────────────────────────────────────────────┐
+                     │                   rv32i_mcu (Top)                           │
+                     │                                                             │
+  ┌──────────────┐   │    ┌────────────┐      ┌────────────────────────────────┐   │
+  │  Instruction │   │    │            │      │          APB Master            │   │
+  │  Memory(ROM) │───┼──▶│  RV32I CPU │───▶ │  IDLE ──▶ SETUP ──▶ ACCESS   │   │
+  │  (256 x 32b) │   │    │ (Multi-Cyc)│◀─── │   Addr Decoder + APB MUX       │   │
+  └──────────────┘   │    └────────────┘      └──────┬─────────────────────────┘   │
+                     │                               │ paddr/pwdata/psel/penable   │
+                     │                  ┌────────────┼──────────┬────────────────┐ │
+                     │                  ▼            ▼          ▼                │ │
+                     │             ┌────────┐  ┌────────┐  ┌────────┐            │ │
+                     │             │APB_BRAM│  │APB_GPO │  │APB_GPI │  ...       │ │
+                     │             │0x1000_ │  │0x2000_ │  │0x2001_ │            │ │
+                     │             │  0000  │  │  0000  │  │  0000  │            │ │
+                     │             └────────┘  └────────┘  └────────┘            │ │
+                     └─────────────────────────────────────────────────────────────┘
 ```
 
 ### 모듈 구성
@@ -104,41 +99,42 @@
 
 Multi-Cycle CPU는 하나의 명령어를 최대 5개의 클럭 사이클에 나누어 처리한다.  
 명령어 종류에 따라 사용하는 스테이지 수가 달라지며, APB `ready` 신호에 의해 MEM 스테이지가 연장(stall)된다.
+![Multi_Cycle_Cpu_Design](docs/images/multi_cycle_cpu_design.png)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Control Unit State Machine                         │
 │                                                                              │
 │                  ┌────────────────────────────────────────────┐              │
-│                  │              (always)                       │              │
+│                  │              (always)                      │              │
 │                  ▼                                            │              │
 │          ┌──────────────┐                                     │              │
-│          │   FETCH      │  pc_en = 1                         │              │
+│          │   FETCH      │  pc_en = 1                          │              │
 │          │   (IF)       │                                     │              │
 │          └──────┬───────┘                                     │              │
 │                 │                                             │              │
 │                 ▼                                             │              │
 │          ┌──────────────┐                                     │              │
-│          │   DECODE     │  IMM Extend                        │              │
-│          │   (ID)       │  Register File Read                │              │
+│          │   DECODE     │  IMM Extend                         │              │
+│          │   (ID)       │  Register File Read                 │              │
 │          └──────┬───────┘                                     │              │
 │                 │                                             │              │
 │                 ▼                                             │              │
-│          ┌──────────────┐   R/I/U/B/J/JL Type ──────────────┘              │
+│          ┌──────────────┐   R/I/U/B/J/JL Type ────────────────┘              │
 │          │   EXECUTE    │  ALU operation, Branch decision                    │
 │          │   (EX)       │  PC next computation                               │
 │          └──────┬───────┘                                     │              │
 │            S/IL │                                             │              │
 │                 ▼                                             │              │
 │          ┌──────────────┐                                     │              │
-│          │   MEMORY     │  dwe=1 (S-Type: APB Write)         │              │
-│          │   (MEM)      │  dre=1 (IL-Type: APB Read)         │              │
-│          │              │  Waits for APB pready              │              │
+│          │   MEMORY     │  dwe=1 (S-Type: APB Write)          │              │
+│          │   (MEM)      │  dre=1 (IL-Type: APB Read)          │              │
+│          │              │  Waits for APB pready               │              │
 │          └──────┬───────┘                                     │              │
 │           IL-T  │                                             │              │
 │                 ▼                                             │              │
 │          ┌──────────────┐                                     │              │
-│          │  WRITE BACK  │  rf_we=1, rfwd_srcsel=MEM_data    │              │
+│          │  WRITE BACK  │  rf_we=1, rfwd_srcsel=MEM_data      │              │
 │          │   (WB)       │─────────────────────────────────────┘              │
 │          └──────────────┘                                                    │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -160,12 +156,7 @@ Multi-Cycle CPU는 하나의 명령어를 최대 5개의 클럭 사이클에 나
 
 ### 3.2 Datapath
 
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: rv32i_datapath.sv 기반의 Datapath 블록 다이어그램
-  (Program Counter, Register File, ALU, IMM Extender, Stage Registers, WB MUX 포함)
-  파일명 예시: docs/images/datapath.png
--->
+![Datapath](docs/images/datapath.png)
 
 핵심 데이터패스 구성요소:
 
@@ -211,24 +202,26 @@ RV32I Base Integer Instruction Set
 CPU의 `bus_wreq`(write request) / `bus_rreq`(read request) 신호를 감지하여  
 AMBA APB 프로토콜 트랜잭션을 생성하는 3상태 FSM.
 
+![APB_Master_State_Machine](docs/images/APB_Master_State_Machine.png)
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          APB Master State Machine                           │
-│                                                                             │
-│                        wreq || rreq                                        │
-│          ┌──────────────────────────────────┐                              │
-│          │                                  │                              │
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          APB Master State Machine                         │
+│                                                                           │
+│                        wreq || rreq                                       │
+│          ┌──────────────────────────────────┐                             │
+│          │                                  │                             │
 │   ┌──────▼──────┐                    ┌──────┴──────┐                      │
 │   │    IDLE     │                    │    SETUP    │  psel=1, penable=0   │
-│   │             │◀───────────────────│             │  (1 clock)           │
+│   │             │◀──────────────────│             │  (1 clock)           │
 │   │ psel=0      │                    └──────┬──────┘                      │
-│   │ penable=0   │                           │                              │
-│   └─────────────┘                           ▼                              │
-│          ▲                           ┌──────────────┐                      │
+│   │ penable=0   │                           │                             │
+│   └─────────────┘                           ▼                             │
+│          ▲                           ┌──────────────┐                     │
 │          │      pready == 1          │    ACCESS    │  psel=1, penable=1  │
 │          └───────────────────────────│              │  Wait for pready    │
-│                                      └──────────────┘                      │
-└─────────────────────────────────────────────────────────────────────────────┘
+│                                      └──────────────┘                     │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 | Signal | Direction | Description |
@@ -250,29 +243,29 @@ AMBA APB 프로토콜 트랜잭션을 생성하는 3상태 FSM.
 Address Map (32-bit)
 ─────────────────────────────────────────────────
 0x1000_0000  ┌─────────────────────────────┐
-             │  BRAM (Data Memory)          │  psel0
+             │  BRAM (Data Memory)         │  psel0
              │  4KB (1024 x 32-bit)        │
 0x1000_0FFF  └─────────────────────────────┘
 
 0x2000_0000  ┌─────────────────────────────┐
              │  GPO   (Left LED, Output)   │  psel1
-0x2000_0004  │  CTRL[0x00] | ODATA[0x04]  │
+0x2000_0004  │  CTRL[0x00] | ODATA[0x04]   │
              └─────────────────────────────┘
 0x2001_0000  ┌─────────────────────────────┐
              │  GPI   (Left SW, Input)     │  psel2
-0x2001_0004  │  CTRL[0x00] | IDATA[0x04]  │
+0x2001_0004  │  CTRL[0x00] | IDATA[0x04]   │
              └─────────────────────────────┘
 0x2002_0000  ┌─────────────────────────────┐
              │  GPIO  (Right SW/LED, Bidir)│  psel3
-0x2002_0008  │  CTRL/ODATA/IDATA[0x00~08] │
+0x2002_0008  │  CTRL/ODATA/IDATA[0x00~08]  │
              └─────────────────────────────┘
 0x2003_0000  ┌─────────────────────────────┐
              │  FND   (7-Segment Display)  │  psel4
-0x2003_0004  │  CTRL[0x00] | ODATA[0x04]  │
+0x2003_0004  │  CTRL[0x00] | ODATA[0x04]   │
              └─────────────────────────────┘
 0x2004_0000  ┌─────────────────────────────┐
              │  UART  (Serial Comm)        │  psel5
-0x2004_0010  │  CTRL/BAUD/STATUS/TX/RX    │
+0x2004_0010  │  CTRL/BAUD/STATUS/TX/RX     │
              └─────────────────────────────┘
 ─────────────────────────────────────────────────
 ```
@@ -302,6 +295,9 @@ endcase
 - **Size:** 1024 words × 32-bit = **4KB**
 - **Access:** Synchronous Write / Asynchronous Read
 - **pready:** `penable & psel` 조합으로 1-cycle latency 구현
+- 
+
+![BRAM](docs/images/BRAM.png)
 
 ```systemverilog
 // 비동기 읽기 (pready 즉시 응답)
@@ -321,7 +317,7 @@ end
 
 | 레지스터 | 오프셋 | 기능 |
 |---------|--------|------|
-| `CTRL` | `0x00` | 비트별 출력 허가 마스크 (`1`: 출력 활성, `0`: 강제 Low) |
+| `CTRL`  | `0x00` | 비트별 출력 허가 마스크 (`1`: 출력 활성, `0`: 강제 Low) |
 | `ODATA` | `0x04` | 출력 데이터 레지스터 |
 
 ```systemverilog
@@ -346,6 +342,8 @@ endgenerate
 ### 5.3 GPIO (Bidirectional)
 
 CTRL 레지스터의 비트 값에 따라 핀별로 출력/입력 방향을 독립적으로 설정.
+
+![GPIO](docs/images/GPIO.png)
 
 ```systemverilog
 // 3-state 버퍼를 통한 양방향 핀 제어
@@ -372,11 +370,7 @@ endgenerate
 4자리 7-세그먼트 디스플레이를 Multiplexing 방식으로 제어.  
 APB로부터 BCD 숫자값(0~9999)을 받아 자동으로 각 자리를 분리하여 표시.
 
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: FND 컨트롤러 내부 블록 구조 다이어그램 또는 실제 FND 동작 사진
-  파일명 예시: docs/images/fnd_controller.png
--->
+![FND](docs/images/FND.png)
 
 ```
 APB_FND 내부 신호 흐름
@@ -417,11 +411,7 @@ fnd_odata_reg[13:0]
 표준 UART 프레임(8N1)을 지원하는 TX/RX 모듈.  
 오버샘플링 방식(16x b_tick)으로 노이즈에 강인한 수신을 구현.
 
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: UART 송수신 파형 캡처 (Vivado 시뮬레이션 또는 로직 분석기)
-  파일명 예시: docs/images/uart_waveform.png
--->
+![UART](docs/images/UART.png)
 
 **레지스터 맵:**
 
@@ -562,15 +552,6 @@ while(1) {
 
 각 기능 블록을 단계적으로 검증하는 Bottom-Up 방식을 채택.
 
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: Vivado 시뮬레이션 파형 캡처
-  - Multi-Cycle FSM 상태 전이 파형 (FETCH→DECODE→EXECUTE→MEM→WB)
-  - APB 트랜잭션 파형 (IDLE→SETUP→ACCESS, pready 응답)
-  - UART TX/RX 파형
-  파일명 예시: docs/images/sim_multicycle.png, docs/images/sim_apb.png
--->
-
 **검증 순서:**
 
 1. **RV32I 단일 명령어 검증**
@@ -639,15 +620,6 @@ UART:
 
 ### 8.2 동작 시연 시나리오
 
-<!-- 
-  [이미지 삽입 위치]
-  권장 이미지: 실제 Basys-3 보드 동작 사진
-  - LED 블링크 동작 사진
-  - FND 숫자 표시 사진
-  - PC와 UART 터미널 연결 화면 (에코백 동작)
-  파일명 예시: docs/images/board_fnd.jpg, docs/images/board_uart.jpg
--->
-
 | 시나리오 | 조작 | 예상 동작 |
 |---------|------|----------|
 | GPO/GPI 미러링 | 왼쪽 스위치 ON | 해당 왼쪽 LED 점등 |
@@ -656,6 +628,8 @@ UART:
 | FND UART 표시 | SW15 ON + PC 터미널 입력 | 수신 문자 ASCII 코드 FND 표시 |
 | UART 에코백 | PC 터미널에서 문자 송신 | 동일 문자 수신 확인 (echo) |
 | 통합 동작 | final.c 로드 | 위 모든 기능 동시 동작 |
+
+https://github.com/user-attachments/assets/1149d4ef-c661-42a5-9d99-16b4b204819b
 
 ---
 
@@ -697,11 +671,21 @@ RISC-V_MCU_Project/
 │   ├── uart.c                    # UART 에코백
 │   └── final.c                   # 전체 통합 데모
 │
-├── constraints/
+├── xdc/
 │   └── Basys-3-Master.xdc        # FPGA 핀 제약
 │
 └── docs/
-    └── RISCV_team_project.pdf    # 발표 자료
+    ├── RISC-V_team_project.pdf    # 발표 자료
+    ├── images/
+    │    └── block_diagram_top.png
+    │    ├── GPIO.png
+    │    ├── APB_Master_State_Machine.png
+    │    ├── BRAM.png
+    │    ├── UART.png
+    │    ├── FND.png
+    │    ├── multi_cycle_cpu_design.png
+    │    └── demo.mp4
+    └── RISC-V_team_project.pptx
 ```
 
 ---
